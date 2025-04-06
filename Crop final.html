@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Recortar y Redimensionar Imagen</title>
+  <style>
+    body{font-family:'Inter',sans-serif;text-align:center;padding:2rem;background:#fff;color:#000;max-width:1000px;margin:0 auto;font-weight:300;line-height:1.5}
+    h1{font-weight:200;letter-spacing:1.5px;margin-bottom:30px;text-transform:uppercase;font-size:24px}
+    input[type="file"]{margin-bottom:1rem;background:#f5f5f5;padding:8px;border-radius:4px}
+    .action-btn{padding:8px 15px;border:none;border-radius:4px;cursor:pointer;font-size:13px;font-weight:300;transition:all 0.3s}
+    .primary-btn{background:#000;color:#fff}
+    .primary-btn:hover{background:#333}
+    .warning-btn{background:#f44336;color:#fff}
+    .warning-btn:hover{background:#d32f2f}
+    .image-container{position:relative;max-width:100%;margin:20px auto;display:inline-block}
+    #originalImage{max-width:100%;max-height:600px;display:block;margin:0 auto;border:1px solid #ccc}
+    #cropArea{position:absolute;border:2px dashed red;background:rgba(255,0,0,0.1);cursor:move;box-sizing:border-box}
+    .resize-handle{width:10px;height:10px;background:white;border:2px solid red;position:absolute}
+    .resize-handle.nw{top:-5px;left:-5px;cursor:nw-resize}
+    .resize-handle.ne{top:-5px;right:-5px;cursor:ne-resize}
+    .resize-handle.sw{bottom:-5px;left:-5px;cursor:sw-resize}
+    .resize-handle.se{bottom:-5px;right:-5px;cursor:se-resize}
+    .option-controls{margin:15px 0;display:flex;justify-content:center;align-items:center;gap:15px;flex-wrap:wrap}
+    .ratio-buttons{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .ratio-btn{display:inline-block;padding:6px 12px;background:#f5f5f5;border:1px solid #ddd;border-radius:4px;cursor:pointer;font-size:13px;transition:all 0.2s}
+    .ratio-btn:hover{background:#e9e9e9}
+    .ratio-btn.active{background:#000;color:#fff;border-color:#000}
+    #preview-container{margin:20px 0;position:relative;display:inline-block}
+    #preview-container canvas{border:1px solid #ccc;box-shadow:0 2px 5px rgba(0,0,0,0.1);max-width:100%;max-height:600px}
+    .split-view{display:flex;justify-content:space-around;align-items:flex-start;flex-wrap:wrap;margin:20px 0}
+    .split-view>div{flex:1;min-width:300px;margin:0 10px 20px}
+    .split-view h3{font-weight:300;margin-bottom:15px;font-size:16px}
+    .action-buttons{display:flex;justify-content:center;gap:15px;margin:20px 0}
+    .download-btn{display:inline-block;background:#000;color:white;text-decoration:none;padding:8px 15px;border-radius:4px;font-size:13px;transition:background 0.3s}
+    .download-btn:hover{background:#333}
+    .output-info{font-size:13px;color:#666;margin-top:15px}
+  </style>
+</head>
+<body>
+  <h1>RECORTAR Y REDIMENSIONAR IMAGEN</h1>
+  
+  <div>
+    <input type="file" id="imageInput" accept="image/*">
+  </div>
+  
+  <div class="option-controls">
+    <div class="ratio-buttons">
+      <span>Proporción:</span>
+      <button id="ratioOriginal" class="ratio-btn active">Original</button>
+      <button id="ratio1_1" class="ratio-btn">1:1</button>
+      <button id="ratio4_5" class="ratio-btn">4:5</button>
+      <button id="ratio5_4" class="ratio-btn">5:4</button>
+      <button id="ratio9_16" class="ratio-btn">9:16</button>
+      <button id="ratioFree" class="ratio-btn">Libre</button>
+    </div>
+  </div>
+  
+  <div class="split-view">
+    <div>
+      <h3>Imagen Original</h3>
+      <div class="image-container">
+        <img id="originalImage" alt="Imagen original">
+        <div id="cropArea">
+          <div class="resize-handle nw" id="nwHandle"></div>
+          <div class="resize-handle ne" id="neHandle"></div>
+          <div class="resize-handle sw" id="swHandle"></div>
+          <div class="resize-handle se" id="seHandle"></div>
+        </div>
+      </div>
+    </div>
+    
+    <div>
+      <h3>Vista Previa</h3>
+      <div id="preview-container">
+        <canvas id="previewCanvas"></canvas>
+      </div>
+      <div class="output-info" id="outputInfo"></div>
+    </div>
+  </div>
+  
+  <div class="action-buttons">
+    <a id="downloadBtn" class="download-btn" download="imagen_recortada.jpg">Descargar imagen</a>
+    <button id="resetBtn" class="action-btn warning-btn">Reiniciar</button>
+  </div>
+  
+  <script>
+    // Elementos del DOM
+    const els = {
+      imageInput: document.getElementById('imageInput'),
+      originalImage: document.getElementById('originalImage'),
+      cropArea: document.getElementById('cropArea'),
+      nwHandle: document.getElementById('nwHandle'),
+      neHandle: document.getElementById('neHandle'),
+      swHandle: document.getElementById('swHandle'),
+      seHandle: document.getElementById('seHandle'),
+      previewCanvas: document.getElementById('previewCanvas'),
+      downloadBtn: document.getElementById('downloadBtn'),
+      resetBtn: document.getElementById('resetBtn'),
+      splitView: document.querySelector('.split-view'),
+      optionControls: document.querySelector('.option-controls'),
+      outputInfo: document.getElementById('outputInfo'),
+      ratioOriginal: document.getElementById('ratioOriginal'),
+      ratio1_1: document.getElementById('ratio1_1'),
+      ratio4_5: document.getElementById('ratio4_5'),
+      ratio5_4: document.getElementById('ratio5_4'),
+      ratio9_16: document.getElementById('ratio9_16'),
+      ratioFree: document.getElementById('ratioFree')
+    };
+    
+    // Variables para el manejo del recorte
+    let originalWidth, originalHeight, displayWidth, displayHeight;
+    let cropX = 0, cropY = 0, cropWidth = 0, cropHeight = 0;
+    let isDragging = false, isResizing = false, currentHandle = null;
+    let dragStartX, dragStartY, startCropX, startCropY, startCropWidth, startCropHeight;
+    let aspectRatio = 1;
+    let currentRatioMode = 'original'; // 'original', '1:1', '4:5', '5:4', '9:16', 'free'
+    
+    // Ocultar elementos inicialmente
+    els.cropArea.style.display = 'none';
+    els.splitView.style.display = 'none';
+    els.optionControls.style.display = 'none';
+    
+    // Inicializar eventos de carga de imagen y recorte
+    els.imageInput.addEventListener('change', handleImageUpload);
+    els.cropArea.addEventListener('mousedown', startDragCrop);
+    els.nwHandle.addEventListener('mousedown', e => startResize(e, 'nw'));
+    els.neHandle.addEventListener('mousedown', e => startResize(e, 'ne'));
+    els.swHandle.addEventListener('mousedown', e => startResize(e, 'sw'));
+    els.seHandle.addEventListener('mousedown', e => startResize(e, 'se'));
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', () => { isDragging = isResizing = false; });
+    els.resetBtn.addEventListener('click', () => originalImage.src && initializeCrop());
+    
+    // Eventos para botones de proporción
+    els.ratioOriginal.addEventListener('click', () => setRatioMode('original'));
+    els.ratio1_1.addEventListener('click', () => setRatioMode('1:1'));
+    els.ratio4_5.addEventListener('click', () => setRatioMode('4:5'));
+    els.ratio5_4.addEventListener('click', () => setRatioMode('5:4'));
+    els.ratio9_16.addEventListener('click', () => setRatioMode('9:16'));
+    els.ratioFree.addEventListener('click', () => setRatioMode('free'));
+    
+    // Función para cambiar el modo de proporción
+    function setRatioMode(mode) {
+      currentRatioMode = mode;
+      
+      // Actualizar UI de botones
+      document.querySelectorAll('.ratio-btn').forEach(btn => btn.classList.remove('active'));
+      
+      switch(mode) {
+        case 'original':
+          els.ratioOriginal.classList.add('active');
+          if (originalWidth && originalHeight) {
+            adjustCropAreaToRatio(originalWidth / originalHeight);
+          }
+          break;
+        case '1:1':
+          els.ratio1_1.classList.add('active');
+          adjustCropAreaToRatio(1);
+          break;
+        case '4:5':
+          els.ratio4_5.classList.add('active');
+          adjustCropAreaToRatio(4/5);
+          break;
+        case '5:4':
+          els.ratio5_4.classList.add('active');
+          adjustCropAreaToRatio(5/4);
+          break;
+        case '9:16':
+          els.ratio9_16.classList.add('active');
+          adjustCropAreaToRatio(9/16);
+          break;
+        case 'free':
+          els.ratioFree.classList.add('active');
+          // No hacer nada, dejar que el usuario ajuste libremente
+          break;
+      }
+    }
+    
+    // Ajustar el área de recorte a una proporción específica
+    function adjustCropAreaToRatio(ratio) {
+      if (!cropWidth || !cropHeight) return;
+      
+      // Mantener el centro del área de recorte
+      const centerX = cropX + cropWidth / 2;
+      const centerY = cropY + cropHeight / 2;
+      
+      // Calcular nuevas dimensiones manteniendo el área aproximada
+      const area = cropWidth * cropHeight;
+      let newWidth = Math.sqrt(area * ratio);
+      let newHeight = newWidth / ratio;
+      
+      // Asegurarse de que cabe en la imagen
+      if (newWidth > displayWidth) {
+        newWidth = displayWidth;
+        newHeight = newWidth / ratio;
+      }
+      
+      if (newHeight > displayHeight) {
+        newHeight = displayHeight;
+        newWidth = newHeight * ratio;
+      }
+      
+      // Actualizar dimensiones
+      cropWidth = Math.round(newWidth);
+      cropHeight = Math.round(newHeight);
+      
+      // Reposicionar para mantener el centro
+      cropX = Math.round(centerX - cropWidth / 2);
+      cropY = Math.round(centerY - cropHeight / 2);
+      
+      // Asegurar que no se salga de los límites
+      cropX = Math.max(0, Math.min(cropX, displayWidth - cropWidth));
+      cropY = Math.max(0, Math.min(cropY, displayHeight - cropHeight));
+      
+      // Actualizar la visualización
+      updateCropAreaDisplay();
+      updatePreview();
+    }
+    
+    // Función para manejar la carga de imágenes
+    function handleImageUpload() {
+      if (!els.imageInput.files || !els.imageInput.files[0]) return;
+      
+      const file = els.imageInput.files[0];
+      if (!file.type.match('image.*')) {
+        alert('Por favor, selecciona un archivo de imagen válido.');
+        return;
+      }
+      
+      const reader = new FileReader();
+      reader.onload = e => {
+        els.originalImage.onload = initializeCrop;
+        els.originalImage.src = e.target.result;
+        els.splitView.style.display = 'flex';
+        els.optionControls.style.display = 'flex';
+      };
+      reader.readAsDataURL(file);
+    }
+    
+    // Inicializar el área de recorte
+    function initializeCrop() {
+      // Dimensiones
+      originalWidth = els.originalImage.naturalWidth;
+      originalHeight = els.originalImage.naturalHeight;
+      aspectRatio = originalWidth / originalHeight;
+      displayWidth = els.originalImage.clientWidth;
+      displayHeight = els.originalImage.clientHeight;
+      
+      // Inicializar recorte al 80% del centro
+      cropWidth = Math.round(displayWidth * 0.8);
+      cropHeight = Math.round(displayHeight * 0.8);
+      
+      // Aplicar el modo de ratio actual
+      if (currentRatioMode !== 'free') {
+        let targetRatio;
+        switch(currentRatioMode) {
+          case 'original': targetRatio = aspectRatio; break;
+          case '1:1': targetRatio = 1; break;
+          case '4:5': targetRatio = 4/5; break;
+          case '5:4': targetRatio = 5/4; break;
+          case '9:16': targetRatio = 9/16; break;
+          default: targetRatio = aspectRatio;
+        }
+        
+        // Ajustar dimensiones para el ratio
+        if (cropWidth / cropHeight > targetRatio) {
+          cropWidth = Math.round(cropHeight * targetRatio);
+        } else {
+          cropHeight = Math.round(cropWidth / targetRatio);
+        }
+      }
+      
+      // Centrar el área de recorte
+      cropX = Math.round((displayWidth - cropWidth) / 2);
+      cropY = Math.round((displayHeight - cropHeight) / 2);
+      
+      // Canvas para preview
+      els.previewCanvas.width = displayWidth;
+      els.previewCanvas.height = displayHeight;
+      
+      updateCropAreaDisplay();
+      updatePreview();
+      els.cropArea.style.display = 'block';
+    }
+    
+    // Actualizar visualización del área de recorte
+    function updateCropAreaDisplay() {
+      els.cropArea.style.left = cropX + 'px';
+      els.cropArea.style.top = cropY + 'px';
+      els.cropArea.style.width = cropWidth + 'px';
+      els.cropArea.style.height = cropHeight + 'px';
+      
+      // Actualizar información
+      const cropRatio = cropWidth / cropHeight;
+      const scaleX = originalWidth / displayWidth;
+      const scaleY = originalHeight / displayHeight;
+      const realCropWidth = Math.round(cropWidth * scaleX);
+      const realCropHeight = Math.round(cropHeight * scaleY);
+      
+      els.outputInfo.textContent = `Dimensión del recorte: ${realCropWidth}×${realCropHeight}px • Proporción: ${cropRatio.toFixed(2)}`;
+    }
+    
+    // Actualizar la vista previa
+    function updatePreview() {
+      const ctx = els.previewCanvas.getContext('2d');
+      
+      // Limpiar y configurar canvas
+      ctx.clearRect(0, 0, els.previewCanvas.width, els.previewCanvas.height);
+      ctx.fillStyle = '#f0f0f0';
+      ctx.fillRect(0, 0, els.previewCanvas.width, els.previewCanvas.height);
+      
+      // Calcular escalas
+      const scaleX = originalWidth / displayWidth;
+      const scaleY = originalHeight / displayHeight;
+      
+      // Coordenadas en imagen original
+      const sourceX = cropX * scaleX;
+      const sourceY = cropY * scaleY;
+      const sourceWidth = cropWidth * scaleX;
+      const sourceHeight = cropHeight * scaleY;
+      
+      // Dibujar porción recortada
+      ctx.drawImage(
+        els.originalImage,
+        sourceX, sourceY, sourceWidth, sourceHeight,
+        cropX, cropY, cropWidth, cropHeight
+      );
+      
+      // Borde alrededor del área recortada
+      ctx.strokeStyle = '#2196F3';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(cropX, cropY, cropWidth, cropHeight);
+      
+      // Canvas para descarga (usar tamaño real)
+      const finalCanvas = document.createElement('canvas');
+      finalCanvas.width = sourceWidth;
+      finalCanvas.height = sourceHeight;
+      const finalCtx = finalCanvas.getContext('2d');
+      
+      // Imagen final para descarga (tamaño máximo)
+      finalCtx.drawImage(
+        els.originalImage,
+        sourceX, sourceY, sourceWidth, sourceHeight,
+        0, 0, sourceWidth, sourceHeight
+      );
+      
+      // Actualizar link de descarga
+      els.downloadBtn.href = finalCanvas.toDataURL('image/jpeg', 0.9);
+      
+      if (els.imageInput.files[0]) {
+        const fileName = els.imageInput.files[0].name;
+        const baseName = fileName.substring(0, fileName.lastIndexOf('.')) || fileName;
+        els.downloadBtn.download = `${baseName}_${sourceWidth}x${sourceHeight}.jpg`;
+      }
+    }
+    
+    // Eventos de arrastre
+    function startDragCrop(e) {
+      if (e.target !== els.cropArea) return;
+      e.preventDefault();
+      isDragging = true;
+      isResizing = false;
+      dragStartX = e.clientX - els.cropArea.offsetLeft;
+      dragStartY = e.clientY - els.cropArea.offsetTop;
+    }
+    
+    // Iniciar redimensión
+    function startResize(e, handle) {
+      e.preventDefault();
+      e.stopPropagation();
+      isResizing = true;
+      isDragging = false;
+      currentHandle = handle;
+      dragStartX = e.clientX;
+      dragStartY = e.clientY;
+      startCropX = cropX;
+      startCropY = cropY;
+      startCropWidth = cropWidth;
+      startCropHeight = cropHeight;
+    }
+    
+    // Manejar movimiento del mouse
+    function handleMouseMove(e) {
+      if (isDragging) {
+        // Mover área de recorte
+        const newX = e.clientX - dragStartX;
+        const newY = e.clientY - dragStartY;
+        cropX = Math.max(0, Math.min(newX, displayWidth - cropWidth));
+        cropY = Math.max(0, Math.min(newY, displayHeight - cropHeight));
+        updateCropAreaDisplay();
+        updatePreview();
+      } else if (isResizing) {
+        e.preventDefault();
+        const deltaX = e.clientX - dragStartX;
+        const deltaY = e.clientY - dragStartY;
+        
+        // Redimensionar según el modo
+        if (currentRatioMode !== 'free') {
+          let targetRatio;
+          switch(currentRatioMode) {
+            case 'original': targetRatio = aspectRatio; break;
+            case '1:1': targetRatio = 1; break;
+            case '4:5': targetRatio = 4/5; break;
+            case '5:4': targetRatio = 5/4; break;
+            case '9:16': targetRatio = 9/16; break;
+            default: targetRatio = aspectRatio;
+          }
+          resizeWithRatio(currentHandle, deltaX, deltaY, targetRatio);
+        } else {
+          // Modo libre
+          switch (currentHandle) {
+            case 'nw': resizeNW(deltaX, deltaY); break;
+            case 'ne': resizeNE(deltaX, deltaY); break;
+            case 'sw': resizeSW(deltaX, deltaY); break;
+            case 'se': resizeSE(deltaX, deltaY); break;
+          }
+        }
+        
+        updateCropAreaDisplay();
+        updatePreview();
+      }
+    }
+    
+    // Redimensionar manteniendo proporción
+    function resizeWithRatio(handle, deltaX, deltaY, ratio) {
+      // Determinar delta principal
+      let primaryDelta;
+      if (handle === 'nw' || handle === 'se') {
+        primaryDelta = Math.abs(deltaX) > Math.abs(deltaY) ? deltaX : deltaY * ratio;
+      } else {
+        primaryDelta = Math.abs(deltaX) > Math.abs(deltaY) ? deltaX : deltaY * ratio;
+      }
+      
+      // Aplicar cambios según la esquina
+      switch (handle) {
+        case 'nw':
+          const nwWidth = startCropWidth - primaryDelta;
+          const nwHeight = nwWidth / ratio;
+          
+          if (nwWidth >= 50 && nwHeight >= 50) {
+            cropWidth = nwWidth;
+            cropHeight = nwHeight;
+            cropX = startCropX + (startCropWidth - cropWidth);
+            cropY = startCropY + (startCropHeight - cropHeight);
+          }
+          break;
+          
+        case 'ne':
+          const neWidth = startCropWidth + primaryDelta;
+          const neHeight = neWidth / ratio;
+          
+          if (neWidth >= 50 && neHeight >= 50 && 
+              startCropX + neWidth <= displayWidth && 
+              startCropY + (startCropHeight - neHeight) >= 0) {
+            cropWidth = neWidth;
+            cropHeight = neHeight;
+            cropY = startCropY + (startCropHeight - cropHeight);
+          }
+          break;
+          
+        case 'sw':
+          const swWidth = startCropWidth - primaryDelta;
+          const swHeight = swWidth / ratio;
+          
+          if (swWidth >= 50 && swHeight >= 50 && 
+              startCropX + primaryDelta >= 0 && 
+              startCropY + swHeight <= displayHeight) {
+            cropWidth = swWidth;
+            cropHeight = swHeight;
+            cropX = startCropX + (startCropWidth - cropWidth);
+          }
+          break;
+          
+        case 'se':
+          const seWidth = startCropWidth + primaryDelta;
+          const seHeight = seWidth / ratio;
+          
+          if (seWidth >= 50 && seHeight >= 50 && 
+              startCropX + seWidth <= displayWidth && 
+              startCropY + seHeight <= displayHeight) {
+            cropWidth = seWidth;
+            cropHeight = seHeight;
+          }
+          break;
+      }
+    }
+    
+    // Funciones de redimensión libres
+    function resizeNW(deltaX, deltaY) {
+      const newX = startCropX + deltaX;
+      const newY = startCropY + deltaY;
+      
+      const maxMoveX = startCropX + startCropWidth - 50;
+      const maxMoveY = startCropY + startCropHeight - 50;
+      
+      const limitedX = Math.max(0, Math.min(newX, maxMoveX));
+      const limitedY = Math.max(0, Math.min(newY, maxMoveY));
+      
+      cropX = limitedX;
+      cropY = limitedY;
+      cropWidth = startCropWidth - (limitedX - startCropX);
+      cropHeight = startCropHeight - (limitedY - startCropY);
+    }
+    
+    function resizeNE(deltaX, deltaY) {
+      const newWidth = startCropWidth + deltaX;
+      const newY = startCropY + deltaY;
+      
+      const limitedWidth = Math.max(50, Math.min(newWidth, displayWidth - startCropX));
+      const limitedY = Math.max(0, Math.min(newY, startCropY + startCropHeight - 50));
+      
+      cropY = limitedY;
+      cropWidth = limitedWidth;
+      cropHeight = startCropHeight - (limitedY - startCropY);
+    }
+    
+    function resizeSW(deltaX, deltaY) {
+      const newX = startCropX + deltaX;
+      const newHeight = startCropHeight + deltaY;
+      
+      const limitedX = Math.max(0, Math.min(newX, startCropX + startCropWidth - 50));
+      const limitedHeight = Math.max(50, Math.min(newHeight, displayHeight - startCropY));
+      
+      cropX = limitedX;
+      cropWidth = startCropWidth - (limitedX - startCropX);
+      cropHeight = limitedHeight;
+    }
+    
+    function resizeSE(deltaX, deltaY) {
+      cropWidth = Math.max(50, Math.min(startCropWidth + deltaX, displayWidth - startCropX));
+      cropHeight = Math.max(50, Math.min(startCropHeight + deltaY, displayHeight - startCropY));
+    }
+  </script>
+</body>
+</html>
